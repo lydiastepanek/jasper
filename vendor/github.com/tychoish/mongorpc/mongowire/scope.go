@@ -57,9 +57,9 @@ func (s *OpScope) Validate() error {
 			return errors.New("query ops must specify a scope (dbname.collection)")
 		}
 
-		if s.Command != "" {
-			return errors.New("query ops cannot specify a command name")
-		}
+		// if s.Command != "" {
+		// return errors.New("query ops cannot specify a command name")
+		// }
 
 		return nil
 	case OP_INSERT:

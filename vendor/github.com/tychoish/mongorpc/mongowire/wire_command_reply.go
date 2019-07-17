@@ -1,27 +1,25 @@
 package mongowire
 
 import (
-	"github.com/k0kubun/pp"
 	"github.com/pkg/errors"
 	"github.com/tychoish/mongorpc/bson"
 )
 
-func (m *CommandReplyMessage) HasResponse() bool     { return false }
-func (m *CommandReplyMessage) Header() MessageHeader { return m.CommandReplyHeader }
-func (m *CommandReplyMessage) Scope() *OpScope       { return nil }
+func (m *commandReplyMessage) HasResponse() bool     { return false }
+func (m *commandReplyMessage) Header() MessageHeader { return m.header }
+func (m *commandReplyMessage) Scope() *OpScope       { return nil }
 
-func (m *CommandReplyMessage) Serialize() []byte {
+func (m *commandReplyMessage) Serialize() []byte {
 	size := 16 /* header */
 	size += int(m.CommandReply.Size)
 	size += int(m.Metadata.Size)
 	for _, d := range m.OutputDocs {
 		size += int(d.Size)
 	}
-	m.CommandReplyHeader.Size = int32(size)
-	pp.Print(m.CommandReplyHeader.Size)
+	m.header.Size = int32(size)
 
 	buf := make([]byte, size)
-	m.CommandReplyHeader.WriteInto(buf)
+	m.header.WriteInto(buf)
 
 	loc := 16
 
@@ -32,13 +30,12 @@ func (m *CommandReplyMessage) Serialize() []byte {
 		d.Copy(&loc, buf)
 	}
 
-	pp.Print(m)
 	return buf
 }
 
 func (h *MessageHeader) parseCommandReplyMessage(buf []byte) (Message, error) {
-	rm := &CommandReplyMessage{
-		CommandReplyHeader: *h,
+	rm := &commandReplyMessage{
+		header: *h,
 	}
 
 	var err error

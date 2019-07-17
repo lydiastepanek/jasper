@@ -1,9 +1,6 @@
 package mongowire
 
-import (
-	"github.com/k0kubun/pp"
-	"github.com/pkg/errors"
-)
+import "github.com/pkg/errors"
 
 type MessageHeader struct {
 	Size       int32 // total message size
@@ -28,15 +25,11 @@ func (h *MessageHeader) Parse(body []byte) (Message, error) {
 	switch h.OpCode {
 	case OP_REPLY:
 		m, err = h.parseReplyMessage(body)
-		pp.Print("OP_REPLY")
-		pp.Print(m)
 	case OP_UPDATE:
 		m, err = h.parseUpdateMessage(body)
 	case OP_INSERT:
 		m, err = h.parseInsertMessage(body)
 	case OP_QUERY:
-		pp.Print("OP_QUERY")
-		pp.Print(m)
 		m, err = h.parseQueryMessage(body)
 	case OP_GET_MORE:
 		m, err = h.parseGetMoreMessage(body)
@@ -45,8 +38,6 @@ func (h *MessageHeader) Parse(body []byte) (Message, error) {
 	case OP_KILL_CURSORS:
 		m, err = h.parseKillCursorsMessage(body)
 	case OP_COMMAND:
-		pp.Print("OP_COMMAND")
-		pp.Print(m)
 		m, err = h.parseCommandMessage(body)
 	case OP_COMMAND_REPLY:
 		m, err = h.parseCommandReplyMessage(body)

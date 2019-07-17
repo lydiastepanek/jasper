@@ -34,7 +34,7 @@ imports:
   - name: github.com/mongodb/ftdc
     version: 8e1b763add73034cb803b88f1fdd17438e2b7891
   - name: github.com/tychoish/mongorpc
-    version: 3c204a3ee0bd5ba72fdcd8ab0baa779adf879951
+    version: f15d7e9ecc2225611ab96d9b27cd5ab787940f5f
 
   # cgroup requirements
   - name: github.com/containerd/cgroups

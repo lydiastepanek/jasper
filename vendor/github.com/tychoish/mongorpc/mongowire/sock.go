@@ -3,15 +3,12 @@ package mongowire
 import (
 	"io"
 
-	"github.com/k0kubun/pp"
-	"github.com/mongodb/grip"
 	"github.com/pkg/errors"
 )
 
 const MaxInt32 = 2147483647
 
 func ReadMessage(reader io.Reader) (Message, error) {
-	grip.Info("ReadMessage")
 	// read header
 	sizeBuf := make([]byte, 4)
 	n, err := reader.Read(sizeBuf)
@@ -55,7 +52,6 @@ func ReadMessage(reader io.Reader) (Message, error) {
 	header.RequestID = readInt32(restBuf)
 	header.ResponseTo = readInt32(restBuf[4:])
 	header.OpCode = OpType(readInt32(restBuf[8:]))
-	pp.Printf("header = %+v\n", header)
 
 	return header.Parse(restBuf[12:])
 }

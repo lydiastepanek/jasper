@@ -1,4 +1,4 @@
-package main
+package mongowire
 
 import (
 	"context"
@@ -19,7 +19,7 @@ type Service struct {
 	manager jasper.Manager
 }
 
-func NewManagerService(m Manager) *Service {
+func NewManagerService(m jasper.Manager) *Service {
 	return &Service{
 		manager: m,
 	}
@@ -38,8 +38,9 @@ func handleBuildInfo(ctx context.Context, w io.Writer, msg mongowire.Message) {
 }
 
 func handleGetLog(ctx context.Context, w io.Writer, msg mongowire.Message) {
-	logs := bsonx.EC.String("logs", "hello")
-	doc := bsonx.NewDocument(logs)
+	logs := bsonx.EC.ArrayFromElements("log", bsonx.VC.ArrayFromValues(bsonx.VC.String("hello")))
+	ok := bsonx.EC.Int32("ok", 1)
+	doc := bsonx.NewDocument(ok, logs)
 	grip.Error(errors.Wrap(writeReply(doc, w), "could not make response to getLog"))
 }
 
@@ -49,7 +50,19 @@ func handleGetFreeMonitoringStatus(ctx context.Context, w io.Writer, msg mongowi
 	grip.Error(errors.Wrap(writeReply(doc, w), "could not make response to getFreeMonitoringStatus"))
 }
 
-func handleStartProcess(ctx context.Context, w io.Writer, msg mongowire.Message) {
+func handleReplSetGetStatus(ctx context.Context, w io.Writer, msg mongowire.Message) {
+	ok := bsonx.EC.Int32("ok", 0)
+	doc := bsonx.NewDocument(ok)
+	grip.Error(errors.Wrap(writeReply(doc, w), "could not make response to replSetGetStatus"))
+}
+
+func handleListCollections(ctx context.Context, w io.Writer, msg mongowire.Message) {
+	ok := bsonx.EC.Int32("ok", 0)
+	doc := bsonx.NewDocument(ok)
+	grip.Error(errors.Wrap(writeReply(doc, w), "could not make response to listCollections"))
+}
+
+func handleCreateProcess(ctx context.Context, w io.Writer, msg mongowire.Message) {
 	cmdMsg, ok := msg.(*mongowire.CommandMessage)
 	if !ok {
 		grip.Error(errors.New("received unexpected mongo message"))
@@ -60,17 +73,17 @@ func handleStartProcess(ctx context.Context, w io.Writer, msg mongowire.Message)
 		grip.Error(errors.New("received unexpected mongo message"))
 		return
 	}
-	cmdMessageStartProcessArgs := cmdMsgDoc.Lookup("startProcess")
-	// pp.Print("cmdMessageStartProcessArgs")
-	// pp.Print(cmdMessageStartProcessArgs)
-	// convert cmdMessageStartProcessArgs which is a value to a document
-	subDoc, subDocOk := cmdMessageStartProcessArgs.MutableDocumentOK()
+	cmdMessageCreateProcessArgs := cmdMsgDoc.Lookup("createProcess")
+	// pp.Print("cmdMessageCreateProcessArgs")
+	// pp.Print(cmdMessageCreateProcessArgs)
+	// convert cmdMessageCreateProcessArgs which is a value to a document
+	subDoc, subDocOk := cmdMessageCreateProcessArgs.MutableDocumentOK()
 	// pp.Print("subDoc")
 	// pp.Print(subDoc)
 	// pp.Print("subDocOk")
 	// pp.Print(subDocOk)
 	if !subDocOk {
-		grip.Error(errors.New("could not parse document from startProcess argument"))
+		grip.Error(errors.New("could not parse document from createProcess argument"))
 		return
 	}
 	byteArray, err := subDoc.MarshalBSON()
@@ -104,31 +117,15 @@ func writeReply(doc *bsonx.Document, w io.Writer) error {
 	return errors.Wrap(err, "could not write response")
 }
 
-func (s *Service) App(host string, port int) (*mongowire.Service, error) {
+func (s *Service) RegisterHandlers(host string, port int) (*mongorpc.Service, error) {
 	srv := mongorpc.NewService(host, port)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	mongowireSrv := &Service{
-		manager: manager,
-	}
-
-	if err := srv.RegisterOperation(&mongowire.OpScope{
-		Type:    mongowire.OP_QUERY,
-		Context: "test.$cmd",
-	}, func(ctx context.Context, w io.Writer, msg mongowire.Message) {
-	}); err != nil {
-		grip.Error(err)
-		return
-	}
 
 	if err := srv.RegisterOperation(&mongowire.OpScope{
 		Type:    mongowire.OP_COMMAND,
 		Context: "admin",
 		Command: "isMaster",
 	}, handleIsMaster); err != nil {
-		grip.Error(errors.Wrap(err, "could not register handler for isMaster"))
-		return
+		return nil, errors.Wrap(err, "could not register handler for isMaster")
 	}
 
 	if err := srv.RegisterOperation(&mongowire.OpScope{
@@ -136,8 +133,7 @@ func (s *Service) App(host string, port int) (*mongowire.Service, error) {
 		Context: "test",
 		Command: "isMaster",
 	}, handleIsMaster); err != nil {
-		grip.Error(errors.Wrap(err, "could not register handler for isMaster"))
-		return
+		return nil, errors.Wrap(err, "could not register handler for isMaster")
 	}
 
 	if err := srv.RegisterOperation(&mongowire.OpScope{
@@ -149,8 +145,7 @@ func (s *Service) App(host string, port int) (*mongowire.Service, error) {
 		doc := bsonx.NewDocument(uri)
 		grip.Error(errors.Wrap(writeReply(doc, w), "could not make response to whatsmyuri"))
 	}); err != nil {
-		grip.Error(errors.Wrap(err, "could not register handler for whatsmyuri"))
-		return
+		return nil, errors.Wrap(err, "could not register handler for whatsmyuri")
 	}
 
 	if err := srv.RegisterOperation(&mongowire.OpScope{
@@ -158,8 +153,7 @@ func (s *Service) App(host string, port int) (*mongowire.Service, error) {
 		Context: "admin",
 		Command: "buildinfo",
 	}, handleBuildInfo); err != nil {
-		grip.Error(errors.Wrap(err, "could not register handler for buildinfo"))
-		return
+		return nil, errors.Wrap(err, "could not register handler for buildinfo")
 	}
 
 	if err := srv.RegisterOperation(&mongowire.OpScope{
@@ -167,8 +161,7 @@ func (s *Service) App(host string, port int) (*mongowire.Service, error) {
 		Context: "test",
 		Command: "buildInfo",
 	}, handleBuildInfo); err != nil {
-		grip.Error(errors.Wrap(err, "could not register handler for buildinfo"))
-		return
+		return nil, errors.Wrap(err, "could not register handler for buildinfo")
 	}
 
 	if err := srv.RegisterOperation(&mongowire.OpScope{
@@ -176,8 +169,7 @@ func (s *Service) App(host string, port int) (*mongowire.Service, error) {
 		Context: "admin",
 		Command: "getLog",
 	}, handleGetLog); err != nil {
-		grip.Error(errors.Wrap(err, "could not register handler for getLog"))
-		return
+		return nil, errors.Wrap(err, "could not register handler for getLog")
 	}
 
 	if err := srv.RegisterOperation(&mongowire.OpScope{
@@ -185,8 +177,7 @@ func (s *Service) App(host string, port int) (*mongowire.Service, error) {
 		Context: "test",
 		Command: "getLog",
 	}, handleGetLog); err != nil {
-		grip.Error(errors.Wrap(err, "could not register handler for getLog"))
-		return
+		return nil, errors.Wrap(err, "could not register handler for getLog")
 	}
 
 	if err := srv.RegisterOperation(&mongowire.OpScope{
@@ -194,18 +185,34 @@ func (s *Service) App(host string, port int) (*mongowire.Service, error) {
 		Context: "admin",
 		Command: "getFreeMonitoringStatus",
 	}, handleGetFreeMonitoringStatus); err != nil {
-		grip.Error(errors.Wrap(err, "could not register handler for getFreeMonitoringStatus"))
-		return
+		return nil, errors.Wrap(err, "could not register handler for getFreeMonitoringStatus")
+	}
+
+	if err := srv.RegisterOperation(&mongowire.OpScope{
+		Type:    mongowire.OP_COMMAND,
+		Context: "admin",
+		Command: "replSetGetStatus",
+	}, handleReplSetGetStatus); err != nil {
+		return nil, errors.Wrap(err, "could not register handler for replSetGetStatus")
 	}
 
 	if err := srv.RegisterOperation(&mongowire.OpScope{
 		Type:    mongowire.OP_COMMAND,
 		Context: "test",
-		Command: "startProcess",
-	}, handleStartProcess); err != nil {
-		grip.Error(errors.Wrap(err, "could not register handler for getFreeMonitoringStatus"))
-		return
+		Command: "listCollections",
+	}, handleListCollections); err != nil {
+		return nil, errors.Wrap(err, "could not register handler for listCollections")
 	}
+
+	if err := srv.RegisterOperation(&mongowire.OpScope{
+		Type:    mongowire.OP_COMMAND,
+		Context: "test",
+		Command: "createProcess",
+	}, handleCreateProcess); err != nil {
+		return nil, errors.Wrap(err, "could not register handler for createProcess")
+	}
+
+	return srv, nil
 }
 
 // m := Manager{}

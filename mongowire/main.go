@@ -7,12 +7,23 @@ import (
 	"github.com/k0kubun/pp"
 	"github.com/mongodb/ftdc/bsonx"
 	"github.com/mongodb/grip"
-	// "github.com/mongodb/jasper"
+	"github.com/mongodb/jasper"
 	"github.com/pkg/errors"
 	"github.com/tychoish/mongorpc"
-	"github.com/tychoish/mongorpc/bson"
+	mongorpcBson "github.com/tychoish/mongorpc/bson"
 	"github.com/tychoish/mongorpc/mongowire"
+	"go.mongodb.org/mongo-driver/bson"
 )
+
+type Service struct {
+	manager jasper.Manager
+}
+
+func NewManagerService(m Manager) *Service {
+	return &Service{
+		manager: m,
+	}
+}
 
 func handleIsMaster(ctx context.Context, w io.Writer, msg mongowire.Message) {
 	ok := bsonx.EC.Int32("ok", 1)
@@ -50,16 +61,31 @@ func handleStartProcess(ctx context.Context, w io.Writer, msg mongowire.Message)
 		return
 	}
 	cmdMessageStartProcessArgs := cmdMsgDoc.Lookup("startProcess")
+	// pp.Print("cmdMessageStartProcessArgs")
+	// pp.Print(cmdMessageStartProcessArgs)
 	// convert cmdMessageStartProcessArgs which is a value to a document
-	subDoc, subDocOk := bsonx.MutableDocumentOK(cmdMessageStartProcessArgs)
-	if subDocOk {
+	subDoc, subDocOk := cmdMessageStartProcessArgs.MutableDocumentOK()
+	// pp.Print("subDoc")
+	// pp.Print(subDoc)
+	// pp.Print("subDocOk")
+	// pp.Print(subDocOk)
+	if !subDocOk {
+		grip.Error(errors.New("could not parse document from startProcess argument"))
+		return
 	}
-	if cmdMessageStartProcessArgs Document
-	err = bson.Unmarshal(cmdMessageStartProcessArgs, &CreateOptions)
-	// if err != nil {
-	// return err
-	// }
-	// unmarshall data and grab {myFakeData: "hi"} and convert it to CreateOptions
+	byteArray, err := subDoc.MarshalBSON()
+	if err != nil {
+		grip.Error(errors.New("couldn't marshall bson"))
+		return
+	}
+	options := jasper.CreateOptions{}
+	err = bson.Unmarshal(byteArray, &options)
+	pp.Print("options")
+	pp.Print(options)
+	if err != nil {
+		grip.Error(err)
+		return
+	}
 	// pass CreateOptions to CreateProcess
 	responseOk := bsonx.EC.Int32("ok", 0)
 	doc := bsonx.NewDocument(responseOk)
@@ -71,19 +97,22 @@ func writeReply(doc *bsonx.Document, w io.Writer) error {
 	if err != nil {
 		return errors.Wrap(err, "problem marshalling response")
 	}
-	respDoc := bson.Simple{BSON: resp, Size: int32(len(resp))}
+	respDoc := mongorpcBson.Simple{BSON: resp, Size: int32(len(resp))}
 
-	reply := mongowire.NewReply(int64(0), int32(0), int32(0), int32(1), []bson.Simple{respDoc})
+	reply := mongowire.NewReply(int64(0), int32(0), int32(0), int32(1), []mongorpcBson.Simple{respDoc})
 	_, err = w.Write(reply.Serialize())
 	return errors.Wrap(err, "could not write response")
 }
 
-func main() {
+func (s *Service) App(host string, port int) (*mongowire.Service, error) {
+	srv := mongorpc.NewService(host, port)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	srv := mongorpc.NewService("localhost", 12345)
 
-	// db.runCommand({whatever})
+	mongowireSrv := &Service{
+		manager: manager,
+	}
+
 	if err := srv.RegisterOperation(&mongowire.OpScope{
 		Type:    mongowire.OP_QUERY,
 		Context: "test.$cmd",
@@ -93,7 +122,6 @@ func main() {
 		return
 	}
 
-	// db.runCommand({isMaster: 1})
 	if err := srv.RegisterOperation(&mongowire.OpScope{
 		Type:    mongowire.OP_COMMAND,
 		Context: "admin",
@@ -112,7 +140,6 @@ func main() {
 		return
 	}
 
-	// db.runCommand({whatsmyuri: 1})
 	if err := srv.RegisterOperation(&mongowire.OpScope{
 		Type:    mongowire.OP_COMMAND,
 		Context: "admin",
@@ -126,7 +153,6 @@ func main() {
 		return
 	}
 
-	// db.runCommand({buildinfo: 1})
 	if err := srv.RegisterOperation(&mongowire.OpScope{
 		Type:    mongowire.OP_COMMAND,
 		Context: "admin",
@@ -145,7 +171,6 @@ func main() {
 		return
 	}
 
-	// db.runCommand({getLog: 1})
 	if err := srv.RegisterOperation(&mongowire.OpScope{
 		Type:    mongowire.OP_COMMAND,
 		Context: "admin",
@@ -164,7 +189,6 @@ func main() {
 		return
 	}
 
-	// db.runCommand({getFreeMonitoringStatus: 1})
 	if err := srv.RegisterOperation(&mongowire.OpScope{
 		Type:    mongowire.OP_COMMAND,
 		Context: "admin",
@@ -174,7 +198,6 @@ func main() {
 		return
 	}
 
-	// db.runCommand({startProcess: {myFakeData: "hi"}})
 	if err := srv.RegisterOperation(&mongowire.OpScope{
 		Type:    mongowire.OP_COMMAND,
 		Context: "test",
@@ -183,6 +206,8 @@ func main() {
 		grip.Error(errors.Wrap(err, "could not register handler for getFreeMonitoringStatus"))
 		return
 	}
-
-	grip.Error(srv.Run(ctx))
 }
+
+// m := Manager{}
+// srv = NewManager(m)
+// srv.App(host, port).run()

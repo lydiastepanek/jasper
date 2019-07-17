@@ -4,7 +4,7 @@ import (
 	"context"
 	"io"
 
-	"github.com/k0kubun/pp"
+	// "github.com/k0kubun/pp"
 	"github.com/mongodb/ftdc/bsonx"
 	"github.com/mongodb/grip"
 	"github.com/mongodb/jasper"
@@ -62,6 +62,49 @@ func handleListCollections(ctx context.Context, w io.Writer, msg mongowire.Messa
 	grip.Error(errors.Wrap(writeReply(doc, w), "could not make response to listCollections"))
 }
 
+func (s *Service) handleList(ctx context.Context, w io.Writer, msg mongowire.Message) {
+	cmdMsg, ok := msg.(*mongowire.CommandMessage)
+	if !ok {
+		grip.Error(errors.New("received unexpected mongo message"))
+		return
+	}
+	cmdMsgDoc, err := bsonx.ReadDocument(cmdMsg.CommandArgs.BSON)
+	if err != nil {
+		grip.Error(errors.New("received unexpected mongo message"))
+		return
+	}
+	cmdListArgs := cmdMsgDoc.Lookup("list")
+	listString, ok := cmdListArgs.StringValueOK()
+	if !ok {
+		grip.Error(errors.New("received unexpected mongo message"))
+		return
+	}
+	list, err := s.manager.List(ctx, jasper.Filter(listString))
+	if err != nil {
+		grip.Error(errors.New("received unexpected mongo message"))
+		return
+	}
+	array := bsonx.MakeArray(len(list))
+	for _, proc := range list {
+		processBSON, err := bson.Marshal(proc.Info(ctx))
+		if err != nil {
+			grip.Error(err)
+			return
+		}
+		processDoc, err := bsonx.ReadDocument(processBSON)
+		if err != nil {
+			grip.Error(err)
+			return
+		}
+		processValueDoc := bsonx.VC.Document(processDoc)
+		array.Append(processValueDoc)
+	}
+	responseOk := bsonx.EC.Int32("ok", 1)
+	arrayDoc := bsonx.EC.Array("processes", array)
+	doc := bsonx.NewDocument(responseOk, arrayDoc)
+	grip.Error(errors.Wrap(writeReply(doc, w), "could not make response to list"))
+}
+
 func (s *Service) handleCreateProcess(ctx context.Context, w io.Writer, msg mongowire.Message) {
 	cmdMsg, ok := msg.(*mongowire.CommandMessage)
 	if !ok {
@@ -108,7 +151,7 @@ func (s *Service) handleCreateProcess(ctx context.Context, w io.Writer, msg mong
 	}
 	processSubDoc := bsonx.EC.SubDocument("info", processDoc)
 	doc := bsonx.NewDocument(responseOk, processSubDoc)
-	grip.Error(errors.Wrap(writeReply(doc, w), "could not make response to getFreeMonitoringStatus"))
+	grip.Error(errors.Wrap(writeReply(doc, w), "could not make response to createProcess"))
 }
 
 func writeReply(doc *bsonx.Document, w io.Writer) error {
@@ -215,6 +258,14 @@ func (s *Service) RegisterHandlers(host string, port int) (*mongorpc.Service, er
 		Context: "test",
 		Command: "createProcess",
 	}, s.handleCreateProcess); err != nil {
+		return nil, errors.Wrap(err, "could not register handler for createProcess")
+	}
+
+	if err := srv.RegisterOperation(&mongowire.OpScope{
+		Type:    mongowire.OP_COMMAND,
+		Context: "test",
+		Command: "list",
+	}, s.handleList); err != nil {
 		return nil, errors.Wrap(err, "could not register handler for createProcess")
 	}
 

@@ -4,7 +4,7 @@ import (
 	"context"
 	"io"
 
-	// "github.com/k0kubun/pp"
+	"github.com/k0kubun/pp"
 	"github.com/mongodb/ftdc/bsonx"
 	"github.com/mongodb/grip"
 	"github.com/mongodb/jasper"
@@ -105,6 +105,112 @@ func (s *Service) handleList(ctx context.Context, w io.Writer, msg mongowire.Mes
 	grip.Error(errors.Wrap(writeReply(doc, w), "could not make response to list"))
 }
 
+func (s *Service) handleGroup(ctx context.Context, w io.Writer, msg mongowire.Message) {
+	cmdMsg, ok := msg.(*mongowire.CommandMessage)
+	if !ok {
+		grip.Error(errors.New("received unexpected mongo message"))
+		return
+	}
+	cmdMsgDoc, err := bsonx.ReadDocument(cmdMsg.CommandArgs.BSON)
+	if err != nil {
+		grip.Error(errors.New("received unexpected mongo message"))
+		return
+	}
+	cmdListArgs := cmdMsgDoc.Lookup("group")
+	groupString, ok := cmdListArgs.StringValueOK()
+	if !ok {
+		grip.Error(errors.New("received unexpected mongo message"))
+		return
+	}
+	group, err := s.manager.Group(ctx, groupString)
+	if err != nil {
+		grip.Error(errors.New("received unexpected mongo message"))
+		return
+	}
+	array := bsonx.MakeArray(len(group))
+	for _, proc := range group {
+		processBSON, err := bson.Marshal(proc.Info(ctx))
+		if err != nil {
+			grip.Error(err)
+			return
+		}
+		processDoc, err := bsonx.ReadDocument(processBSON)
+		if err != nil {
+			grip.Error(err)
+			return
+		}
+		processValueDoc := bsonx.VC.Document(processDoc)
+		array.Append(processValueDoc)
+	}
+	responseOk := bsonx.EC.Int32("ok", 1)
+	arrayDoc := bsonx.EC.Array("processes", array)
+	doc := bsonx.NewDocument(responseOk, arrayDoc)
+	grip.Error(errors.Wrap(writeReply(doc, w), "could not make response to group"))
+}
+
+func (s *Service) handleGet(ctx context.Context, w io.Writer, msg mongowire.Message) {
+	cmdMsg, ok := msg.(*mongowire.CommandMessage)
+	if !ok {
+		grip.Error(errors.New("received unexpected mongo message"))
+		return
+	}
+	cmdMsgDoc, err := bsonx.ReadDocument(cmdMsg.CommandArgs.BSON)
+	if err != nil {
+		grip.Error(errors.New("received unexpected mongo message"))
+		return
+	}
+	cmdListArgs := cmdMsgDoc.Lookup("get")
+	getString, ok := cmdListArgs.StringValueOK()
+	if !ok {
+		grip.Error(errors.New("received unexpected mongo message"))
+		return
+	}
+	process, err := s.manager.Get(ctx, getString)
+	if err != nil {
+		grip.Error(err)
+		return
+	}
+	processBSON, err := bson.Marshal(process.Info(ctx))
+	pp.Print("processBSON")
+	pp.Print(processBSON)
+	if err != nil {
+		grip.Error(err)
+		return
+	}
+	responseOk := bsonx.EC.Int32("ok", 1)
+	processDoc, err := bsonx.ReadDocument(processBSON)
+	if err != nil {
+		grip.Error(err)
+		return
+	}
+	pp.Print("processDoc")
+	pp.Print(processDoc)
+	processSubDoc := bsonx.EC.SubDocument("info", processDoc)
+	doc := bsonx.NewDocument(responseOk, processSubDoc)
+
+	grip.Error(errors.Wrap(writeReply(doc, w), "could not make response to get"))
+}
+
+func (s *Service) handleClear(ctx context.Context, w io.Writer, msg mongowire.Message) {
+	s.manager.Clear(ctx)
+	responseOk := bsonx.EC.Int32("ok", 1)
+	doc := bsonx.NewDocument(responseOk)
+
+	grip.Error(errors.Wrap(writeReply(doc, w), "could not make response to clear"))
+}
+
+func (s *Service) handleClose(ctx context.Context, w io.Writer, msg mongowire.Message) {
+	err := s.manager.Close(ctx)
+	if err != nil {
+		grip.Error(err)
+		return
+	}
+	responseOk := bsonx.EC.Int32("ok", 1)
+	doc := bsonx.NewDocument(responseOk)
+
+	grip.Error(errors.Wrap(writeReply(doc, w), "could not make response to close"))
+}
+
 func (s *Service) handleCreateProcess(ctx context.Context, w io.Writer, msg mongowire.Message) {
 	cmdMsg, ok := msg.(*mongowire.CommandMessage)
 	if !ok {
@@ -135,7 +241,7 @@ func (s *Service) handleCreateProcess(ctx context.Context, w io.Writer, msg mong
 	}
 	process, err := s.manager.CreateProcess(ctx, &options)
 	if err != nil {
-		grip.Error(err)
+		writeError(err, w)
 		return
 	}
 	processBSON, err := bson.Marshal(process.Info(ctx))
@@ -152,6 +258,13 @@ func (s *Service) handleCreateProcess(ctx context.Context, w io.Writer, msg mong
 	processSubDoc := bsonx.EC.SubDocument("info", processDoc)
 	doc := bsonx.NewDocument(responseOk, processSubDoc)
 	grip.Error(errors.Wrap(writeReply(doc, w), "could not make response to createProcess"))
+}
+
+func writeError(err error, w io.Writer) error {
+	responseNotOk := bsonx.EC.Int32("ok", 0)
+	errorDoc := bsonx.EC.String("error", err.Error())
+	doc := bsonx.NewDocument(responseNotOk, errorDoc)
+	return errors.Wrap(writeReply(doc, w), "could not write error response")
 }
 
 func writeReply(doc *bsonx.Document, w io.Writer) error {
@@ -266,7 +379,39 @@ func (s *Service) RegisterHandlers(host string, port int) (*mongorpc.Service, er
 		Context: "test",
 		Command: "list",
 	}, s.handleList); err != nil {
-		return nil, errors.Wrap(err, "could not register handler for createProcess")
+		return nil, errors.Wrap(err, "could not register handler for list")
+	}
+
+	if err := srv.RegisterOperation(&mongowire.OpScope{
+		Type:    mongowire.OP_COMMAND,
+		Context: "test",
+		Command: "group",
+	}, s.handleGroup); err != nil {
+		return nil, errors.Wrap(err, "could not register handler for group")
+	}
+
+	if err := srv.RegisterOperation(&mongowire.OpScope{
+		Type:    mongowire.OP_COMMAND,
+		Context: "test",
+		Command: "get",
+	}, s.handleGet); err != nil {
+		return nil, errors.Wrap(err, "could not register handler for get")
+	}
+
+	if err := srv.RegisterOperation(&mongowire.OpScope{
+		Type:    mongowire.OP_COMMAND,
+		Context: "test",
+		Command: "clear",
+	}, s.handleClear); err != nil {
+		return nil, errors.Wrap(err, "could not register handler for clear")
+	}
+
+	if err := srv.RegisterOperation(&mongowire.OpScope{
+		Type:    mongowire.OP_COMMAND,
+		Context: "test",
+		Command: "close",
+	}, s.handleClose); err != nil {
+		return nil, errors.Wrap(err, "could not register handler for close")
 	}
 
 	return srv, nil

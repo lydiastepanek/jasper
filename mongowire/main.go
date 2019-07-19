@@ -239,11 +239,42 @@ func (s *Service) handleCreateProcess(ctx context.Context, w io.Writer, msg mong
 		grip.Error(err)
 		return
 	}
-	process, err := s.manager.CreateProcess(ctx, &options)
+	var cctx context.Context
+	var cancel context.CancelFunc
+	if options.Timeout > 0 {
+		cctx, cancel = context.WithTimeout(context.Background(), options.Timeout)
+	} else {
+		cctx, cancel = context.WithCancel(context.Background())
+	}
+	process, err := s.manager.CreateProcess(cctx, &options)
 	if err != nil {
 		writeError(err, w)
 		return
 	}
+
+	if err := process.RegisterTrigger(cctx, func(_ jasper.ProcessInfo) {
+		cancel()
+	}); err != nil {
+		if !process.Info(cctx).Complete {
+			processBSON, err := bson.Marshal(process.Info(ctx))
+			if err != nil {
+				grip.Error(err)
+				return
+			}
+			responseOk := bsonx.EC.Int32("ok", 1)
+			processDoc, err := bsonx.ReadDocument(processBSON)
+			if err != nil {
+				grip.Error(err)
+				return
+			}
+			processSubDoc := bsonx.EC.SubDocument("info", processDoc)
+			doc := bsonx.NewDocument(responseOk, processSubDoc)
+			grip.Error(errors.Wrap(writeReply(doc, w), "could not make response to createProcess"))
+			return
+		}
+		cancel()
+	}
+
 	processBSON, err := bson.Marshal(process.Info(ctx))
 	if err != nil {
 		grip.Error(err)

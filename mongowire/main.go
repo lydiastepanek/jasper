@@ -447,20 +447,3 @@ func (s *Service) RegisterHandlers(host string, port int) (*mongorpc.Service, er
 
 	return srv, nil
 }
-
-func main() {
-	mgr, err := jasper.NewLocalManager(false)
-	if err != nil {
-		grip.Error(err)
-		return
-	}
-	srv := NewManagerService(mgr)
-	runningSrv, err := srv.RegisterHandlers("localhost", 12345)
-	if err != nil {
-		grip.Error(err)
-		return
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	grip.Error(runningSrv.Run(ctx))
-	defer cancel()
-}
